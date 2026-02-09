@@ -1,3 +1,4 @@
+import asyncio
 import os
 import platform
 
@@ -102,7 +103,8 @@ class Calculator(Star):
             return
         # 正常计算
         try:
-            result = self.evaluator.eval(expr, context)
+            # 将计算放入后台线程执行，不阻塞事件循环
+            result = await asyncio.to_thread(self.evaluator.eval, expr, context)
             context.put("ans", result)
             yield event.plain_result(str(result))
         except Exception as e:

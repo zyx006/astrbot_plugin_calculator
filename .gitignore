@@ -208,3 +208,9 @@ __marimo__/
 
 .idea
 data
+
+runtime-*/
+!runtime-win/
+!runtime-win/**
+!runtime-linux/
+!runtime-linux/**

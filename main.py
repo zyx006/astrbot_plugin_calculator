@@ -12,7 +12,7 @@ from astrbot.core.message.components import Plain, Node
 
 class Calculator(Star):
     evaluator = None
-    context = None
+    context = None # 存储变量的上下文，允许用户共用
 
     def __init__(self, context: Context):
         super().__init__(context)
@@ -21,20 +21,24 @@ class Calculator(Star):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         JAR_PATH = os.path.join(BASE_DIR, "Expression-Parser-1.4.0.jar")
-        system = platform.system()
-        if system == "Windows":  # jlink from zulu jdk25
-            JVM_PATH = os.path.join(BASE_DIR, "runtime-win", "bin", "server", "jvm.dll")
-        elif system == "Linux":  # jlink from zulu jdk21
-            JVM_PATH = os.path.join(BASE_DIR, "runtime-linux", "lib", "server", "libjvm.so")
-        else:
-            JVM_PATH = jpype.getDefaultJVMPath()
-        logger.info("Using jar:" + JAR_PATH)
         if not jpype.isJVMStarted():
+            system = platform.system()
+            if system == "Windows":  # jlink from zulu jdk25
+                JVM_PATH = os.path.join(BASE_DIR, "runtime-win", "bin", "server", "jvm.dll")
+            elif system == "Linux":  # jlink from zulu jdk21
+                JVM_PATH = os.path.join(BASE_DIR, "runtime-linux", "lib", "server", "libjvm.so")
+            else:
+                JVM_PATH = jpype.getDefaultJVMPath()
+            logger.info(f"Using jar: {JAR_PATH}")
             jpype.startJVM(JVM_PATH, "--enable-native-access=ALL-UNNAMED", classpath=[JAR_PATH])
+        try:
             ExpressionEvaluator = JClass("cn.czyx007.expression_parser.api.ExpressionEvaluator")
-            HashMap = JClass("java.util.HashMap")
-            self.evaluator = ExpressionEvaluator()
-            self.context = HashMap()
+        except jpype.JException as ex:
+            logger.error(f"无法加载 ExpressionEvaluator，请确保 {JAR_PATH} 在 JVM classpath 中")
+            raise RuntimeError(f"Calculator插件初始化失败: {ex}")
+        HashMap = JClass("java.util.HashMap")
+        self.evaluator = ExpressionEvaluator()
+        self.context = HashMap()
 
     @filter.command("calc")
     async def calculator(self, event: AstrMessageEvent):
@@ -47,8 +51,9 @@ class Calculator(Star):
             return
         if expr == "help full":
             if event.get_platform_name() == "aiocqhttp":
+                # onebot平台发送群合并消息
                 node = Node(
-                    uin=431722705,
+                    uin=event.get_self_id(),
                     name=".",
                     content=[
                         Plain(self.help_full()),
@@ -56,7 +61,7 @@ class Calculator(Star):
                 )
                 yield event.chain_result([node])
                 return
-            else:
+            else:# 其他平台直接发送纯文本
                 yield event.plain_result(self.help_full())
                 return
         if self.evaluator is None or self.context is None:
@@ -90,6 +95,7 @@ class Calculator(Star):
             self.context.put("ans", result)
             yield event.plain_result(str(result))
         except Exception as e:
+            # eval固定抛出<特定异常类的全类名>: <错误信息>
             yield event.plain_result(f"计算错误：{str(e).split(': ', 1)[1]}")
 
     def help_main(self) -> str:
@@ -185,3 +191,4 @@ class Calculator(Star):
 
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
+        #不关闭JVM，因为整个进程周期只能初始化一次JVM，关闭后无法重启JVM

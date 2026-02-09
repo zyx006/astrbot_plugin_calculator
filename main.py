@@ -27,14 +27,14 @@ class Calculator(Star):
         if not jpype.isJVMStarted():
             system = platform.system()
             if system == "Windows":  # jlink from zulu jdk25
-                JVM_PATH = os.path.join(base_dir, "runtime-win", "bin", "server", "jvm.dll")
+                jvm_path = os.path.join(base_dir, "runtime-win", "bin", "server", "jvm.dll")
             elif system == "Linux":  # jlink from zulu jdk21
-                JVM_PATH = os.path.join(base_dir, "runtime-linux", "lib", "server", "libjvm.so")
+                jvm_path = os.path.join(base_dir, "runtime-linux", "lib", "server", "libjvm.so")
             else:
-                JVM_PATH = jpype.getDefaultJVMPath()
+                jvm_path = jpype.getDefaultJVMPath()
 
             logger.info(f"Using jar: {jar_path}")
-            jpype.startJVM(JVM_PATH, "--enable-native-access=ALL-UNNAMED", classpath=[jar_path])
+            jpype.startJVM(jvm_path, "--enable-native-access=ALL-UNNAMED", classpath=[jar_path])
 
         try:
             ExpressionEvaluator = JClass("cn.czyx007.expression_parser.api.ExpressionEvaluator")

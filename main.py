@@ -12,33 +12,36 @@ from astrbot.core.message.components import Plain, Node
 
 class Calculator(Star):
     evaluator = None
-    context = None # 存储变量的上下文，允许用户共用
+    contexts: dict[str, object] = {} # 存储变量的上下文，允许共用，按 session_id 隔离上下文
 
     def __init__(self, context: Context):
         super().__init__(context)
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
-        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-        JAR_PATH = os.path.join(BASE_DIR, "Expression-Parser-1.4.0.jar")
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        jar_path = os.path.join(base_dir, "Expression-Parser-1.4.0.jar")
+        if not os.path.exists(jar_path):
+            raise RuntimeError(f"缺失 Jar 文件: {jar_path}")
+
         if not jpype.isJVMStarted():
             system = platform.system()
             if system == "Windows":  # jlink from zulu jdk25
-                JVM_PATH = os.path.join(BASE_DIR, "runtime-win", "bin", "server", "jvm.dll")
+                JVM_PATH = os.path.join(base_dir, "runtime-win", "bin", "server", "jvm.dll")
             elif system == "Linux":  # jlink from zulu jdk21
-                JVM_PATH = os.path.join(BASE_DIR, "runtime-linux", "lib", "server", "libjvm.so")
+                JVM_PATH = os.path.join(base_dir, "runtime-linux", "lib", "server", "libjvm.so")
             else:
                 JVM_PATH = jpype.getDefaultJVMPath()
-            logger.info(f"Using jar: {JAR_PATH}")
-            jpype.startJVM(JVM_PATH, "--enable-native-access=ALL-UNNAMED", classpath=[JAR_PATH])
+
+            logger.info(f"Using jar: {jar_path}")
+            jpype.startJVM(JVM_PATH, "--enable-native-access=ALL-UNNAMED", classpath=[jar_path])
+
         try:
             ExpressionEvaluator = JClass("cn.czyx007.expression_parser.api.ExpressionEvaluator")
         except jpype.JException as ex:
-            logger.error(f"无法加载 ExpressionEvaluator，请确保 {JAR_PATH} 在 JVM classpath 中")
+            logger.error(f"无法加载 ExpressionEvaluator，请确保 {jar_path} 在 JVM classpath 中")
             raise RuntimeError(f"Calculator插件初始化失败: {ex}")
-        HashMap = JClass("java.util.HashMap")
         self.evaluator = ExpressionEvaluator()
-        self.context = HashMap()
 
     @filter.command("calc")
     async def calculator(self, event: AstrMessageEvent):
@@ -67,14 +70,22 @@ class Calculator(Star):
         if self.evaluator is None or self.context is None:
             yield event.plain_result("计算器插件未正确初始化，请联系管理员重启bot。")
             return
-        # vars
+
+        # 获取独立上下文
+        session_id = event.get_session_id()
+        if session_id not in self.contexts:
+            HashMap = JClass("java.util.HashMap")
+            self.contexts[session_id] = HashMap()
+        context = self.contexts[session_id]
+
+        # vars 只输出ans以外的变量
         if expr == "vars":
-            if self.context.isEmpty() or self.context.size() <= 1:
+            if context.isEmpty() or context.size() <= 1:
                 yield event.plain_result("当前没有任何变量。")
                 return
 
             lines = []
-            entry_set = self.context.entrySet()
+            entry_set = context.entrySet()
             for entry in entry_set:
                 if entry.getKey() != "ans":
                     lines.append(f"{entry.getKey()} = {entry.getValue()}")
@@ -83,20 +94,20 @@ class Calculator(Star):
             return
         # clear
         if expr == "clear":
-            ans = self.context.get("ans")
-            self.context.clear()
+            ans = context.get("ans")
+            context.clear()
             if ans is not None:
-                self.context.put("ans", ans)
+                context.put("ans", ans)
             yield event.plain_result("变量已清空。")
             return
         # 正常计算
         try:
-            result = self.evaluator.eval(expr, self.context)
-            self.context.put("ans", result)
+            result = self.evaluator.eval(expr, context)
+            context.put("ans", result)
             yield event.plain_result(str(result))
         except Exception as e:
-            # eval固定抛出<特定异常类的全类名>: <错误信息>
-            yield event.plain_result(f"计算错误：{str(e).split(': ', 1)[1]}")
+            err_msg = str(e).split(": ", 1)[1] if ": " in str(e) else str(e)
+            yield event.plain_result(f"计算错误：{err_msg}")
 
     def help_main(self) -> str:
         return """\

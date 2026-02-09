@@ -90,7 +90,7 @@ class Calculator(Star):
             self.context.put("ans", result)
             yield event.plain_result(str(result))
         except Exception as e:
-            yield event.plain_result(f"计算错误：{e}")
+            yield event.plain_result(f"计算错误：{str(e).split(': ', 1)[1]}")
 
     def help_main(self) -> str:
         return """\
